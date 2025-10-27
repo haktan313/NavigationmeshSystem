@@ -2,6 +2,7 @@
 #include <glm/gtc/epsilon.hpp>
 #include <algorithm>
 #include <deque>
+#include <map>
 
 static bool IsItEqual(const glm::vec3& a, const glm::vec3& b, float epsilon = 1e-5f)
 {
@@ -74,6 +75,7 @@ void NavMesh::BuildNavMesh()
     
     m_NavMeshDebugger->SetBorderVertices(m_NavMeshVerts3D);
     EarClipping();
+    CreateHalfEdgeStructure();
 }
 
 //----- Render the debug tool -----
@@ -106,14 +108,14 @@ void NavMesh::EarClipping()
                 prevIndex += m_NavMeshVerts3D.size();
             int nextIndex = (i + 1) % m_NavMeshVerts3D.size();
 
-            std::vector<glm::vec2> triangles
+            std::vector<glm::vec2> triangleDummy
             {
                 {m_NavMeshVerts3D[prevIndex].x, m_NavMeshVerts3D[prevIndex].z},
                 {m_NavMeshVerts3D[i].x, m_NavMeshVerts3D[i].z},
                 {m_NavMeshVerts3D[nextIndex].x, m_NavMeshVerts3D[nextIndex].z}
             };
-            glm::vec2 vector1 = {triangles[1].x - triangles[0].x, triangles[1].y - triangles[0].y};
-            glm::vec2 vector2 = {triangles[2].x - triangles[1].x, triangles[2].y - triangles[1].y};
+            glm::vec2 vector1 = {triangleDummy[1].x - triangleDummy[0].x, triangleDummy[1].y - triangleDummy[0].y};
+            glm::vec2 vector2 = {triangleDummy[2].x - triangleDummy[1].x, triangleDummy[2].y - triangleDummy[1].y};
             float cross = vector1.x * vector2.y - vector1.y * vector2.x;
             
             if (cross > 0.f)
@@ -152,6 +154,89 @@ void NavMesh::EarClipping()
     }
     m_NavMeshDebugger->SetEarClipping(connections);
     m_NavMeshDebugger->SetTriangles(m_NavMeshTriangles);
+}
+
+void NavMesh::CreateHalfEdgeStructure()
+{
+    m_HalfEdgeVertices.clear();
+    m_HalfEdgeFaces.clear();
+    m_HalfEdges.clear();
+
+    for (const auto& triangle : m_NavMeshTriangles)
+    {
+        int vertex0Index = FindHalfEdgeIndex(triangle.verts[0]);
+        int vertex1Index = FindHalfEdgeIndex(triangle.verts[1]);
+        int vertex2Index = FindHalfEdgeIndex(triangle.verts[2]);
+
+        m_HalfEdgeFaces.push_back(HalfEdgeFace());
+        int faceIndex = static_cast<int>(m_HalfEdgeFaces.size() - 1);
+        HalfEdgeFace& newFace = m_HalfEdgeFaces.back();
+
+        m_HalfEdges.push_back(HalfEdge());
+        int halfEdge0Index = static_cast<int>(m_HalfEdges.size() - 1);
+        m_HalfEdges.push_back(HalfEdge());
+        int halfEdge1Index = static_cast<int>(m_HalfEdges.size() - 1);
+        m_HalfEdges.push_back(HalfEdge());
+        int halfEdge2Index = static_cast<int>(m_HalfEdges.size() - 1);
+
+        HalfEdge& halfEdge0 = m_HalfEdges[halfEdge0Index];
+        halfEdge0.originVertexIndexID = vertex0Index;
+        halfEdge0.nextHalfEdgeIndexID = halfEdge1Index;
+        halfEdge0.faceIndexID = faceIndex;
+
+        HalfEdge& halfEdge1 = m_HalfEdges[halfEdge1Index];
+        halfEdge1.originVertexIndexID = vertex1Index;
+        halfEdge1.nextHalfEdgeIndexID = halfEdge2Index;
+        halfEdge1.faceIndexID = faceIndex;
+
+        HalfEdge& halfEdge2 = m_HalfEdges[halfEdge2Index];
+        halfEdge2.originVertexIndexID = vertex2Index;
+        halfEdge2.nextHalfEdgeIndexID = halfEdge0Index;
+        halfEdge2.faceIndexID = faceIndex;
+
+        newFace.halfEdgeIndex = halfEdge0Index;
+
+        if (m_HalfEdgeVertices[vertex0Index].halfEdgeIndex == -1)
+            m_HalfEdgeVertices[vertex0Index].halfEdgeIndex = halfEdge0Index;
+        if (m_HalfEdgeVertices[vertex1Index].halfEdgeIndex == -1)
+            m_HalfEdgeVertices[vertex1Index].halfEdgeIndex = halfEdge1Index;
+        if (m_HalfEdgeVertices[vertex2Index].halfEdgeIndex == -1)
+            m_HalfEdgeVertices[vertex2Index].halfEdgeIndex = halfEdge2Index;
+    }
+    std::cout << "Half-Edge structure created with " << m_HalfEdgeVertices.size() << " vertices, "
+              << m_HalfEdges.size() << " half-edges, and " << m_HalfEdgeFaces.size() << " faces." << std::endl;
+    FindTwinHalfEdges();
+}
+
+void NavMesh::FindTwinHalfEdges()
+{
+    std::map<std::pair<int, int>, int> edgeMap; // Key: (start, end vertex), Value: halfEdgeIndex
+    for (size_t i = 0; i < m_HalfEdges.size(); ++i)
+    {
+        const HalfEdge& halfEdge = m_HalfEdges[i];
+        int endVertexIndex = m_HalfEdges[halfEdge.nextHalfEdgeIndexID].originVertexIndexID;
+        edgeMap[{halfEdge.originVertexIndexID, endVertexIndex}] = static_cast<int>(i);
+    }
+    
+    int twinCount = 0;
+    for (size_t i = 0; i < m_HalfEdges.size(); ++i)
+    {
+        HalfEdge& halfEdge = m_HalfEdges[i];
+        if (halfEdge.twinHalfEdgeIndexID != -1)
+            continue; // already assigned
+        int endVertexIndex = m_HalfEdges[halfEdge.nextHalfEdgeIndexID].originVertexIndexID;
+        
+        auto twinValue = edgeMap.find({endVertexIndex, halfEdge.originVertexIndexID});
+        if (twinValue != edgeMap.end())
+        {
+            int twinIndex = twinValue->second;
+            HalfEdge& twinHalfEdge = m_HalfEdges[twinIndex];
+            halfEdge.twinHalfEdgeIndexID = twinIndex;
+            twinHalfEdge.twinHalfEdgeIndexID = static_cast<int>(i);
+            twinCount++;
+        }
+    }
+    std::cout << "Found and assigned " << twinCount << " twin half-edges." << std::endl;
 }
 
 //----- Utility Functions -----
@@ -203,6 +288,20 @@ bool NavMesh::CanClipEar(int prevIndex, int earIndex, int nextIndex, const std::
     }
     return true;
 }
+
+int NavMesh::FindHalfEdgeIndex(const glm::vec3& pos)
+{
+    for (size_t i = 0; i < m_HalfEdgeVertices.size(); ++i)
+        if (IsItEqual(m_HalfEdgeVertices[i].position, pos))
+            return static_cast<int>(i);
+    
+    HalfEdgeVertex newVertex;
+    newVertex.position = pos;
+    m_HalfEdgeVertices.push_back(newVertex);
+    return static_cast<int>(m_HalfEdgeVertices.size() - 1);
+}
+
+//----- Raycasting Functions -----
 
 bool NavMesh::IntersectLineSegmentsXZ(const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& q1,
     const glm::vec3& q2, float& outLambda1, float& outLambda2, float epsilon)

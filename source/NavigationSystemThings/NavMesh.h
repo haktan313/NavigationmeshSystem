@@ -26,6 +26,23 @@ struct NavMeshHitInfo
     glm::vec3 rayEndPoint = glm::vec3(0.0f);
 };
 
+struct HalfEdgeVertex
+{
+    glm::vec3 position;
+    int halfEdgeIndex = -1; // Index of one of the half-edges originating from this vertex
+};
+struct HalfEdgeFace
+{
+    int halfEdgeIndex = -1;
+};
+struct HalfEdge
+{
+    int originVertexIndexID = -1;
+    int twinHalfEdgeIndexID = -1;
+    int nextHalfEdgeIndexID = -1;
+    int faceIndexID = -1;
+};
+
 class NavMesh
 {
 public:
@@ -39,6 +56,8 @@ private:
     void CreateDebugger();
     
     void EarClipping();
+    void CreateHalfEdgeStructure();
+    void FindTwinHalfEdges();
     
     Scene& m_Scene;
     NavMeshDebugger* m_NavMeshDebugger;
@@ -47,8 +66,13 @@ private:
     std::vector<glm::vec3> m_NavMeshVerts3D;
     std::vector<NavMeshTriangle> m_NavMeshTriangles;
 
-    static bool CanClipEar(int prevIndex, int earIndex, int nextIndex, const std::vector<glm::vec3>& vertices);
+    std::vector<HalfEdgeVertex> m_HalfEdgeVertices;
+    std::vector<HalfEdgeFace> m_HalfEdgeFaces;
+    std::vector<HalfEdge> m_HalfEdges;
+
     static bool IsPointInTriangleXZ(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c);
+    static bool CanClipEar(int prevIndex, int earIndex, int nextIndex, const std::vector<glm::vec3>& vertices);
+    int FindHalfEdgeIndex(const glm::vec3& pos);
     
     static bool IntersectLineSegmentsXZ(const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& q1, const glm::vec3& q2, float& outLambda1, float& outLambda2, float epsilon = 1e-6f);
     static bool RaycastXZ(const std::vector<glm::vec3>& vertices, const glm::vec3& rayP1, const glm::vec3& rayP2, NavMeshHitInfo& hitInfo);
