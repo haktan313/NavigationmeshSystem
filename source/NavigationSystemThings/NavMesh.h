@@ -8,6 +8,7 @@ struct NavBuildParams
 {
     glm::vec3 origin = glm::vec3(-15.f, 0.4f, -15.f);
     glm::vec3 maxBounds = glm::vec3(15.f, 2.f, 15.f);
+    float agentRadius = 0.2f;
 };
 struct NavMeshTriangle
 {

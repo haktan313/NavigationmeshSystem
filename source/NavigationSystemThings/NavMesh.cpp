@@ -32,18 +32,19 @@ void NavMesh::BuildBorderFromParams()
     
     glm::vec3 origin = m_BuildParams.origin;
     glm::vec3 maxBounds = m_BuildParams.maxBounds;
+    const float radius = m_BuildParams.agentRadius;
 
     glm::vec3 minPosition
     {
-        std::min(origin.x,maxBounds.x),
+        std::min(origin.x,maxBounds.x) + radius,
         std::min(origin.y,maxBounds.y),
-        std::min(origin.z,maxBounds.z)
+        std::min(origin.z,maxBounds.z) + radius
     };
     glm::vec3 maxPosition
     {
-        std::max(origin.x,maxBounds.x),
+        std::max(origin.x,maxBounds.x) - radius,
         std::max(origin.y,maxBounds.y),
-        std::max(origin.z,maxBounds.z)
+        std::max(origin.z,maxBounds.z) - radius
     };
     float y = minPosition.y;
     
@@ -395,6 +396,7 @@ bool NavMesh::RaycastXZ(const std::vector<glm::vec3>& vertices, const glm::vec3&
 std::vector<std::vector<glm::vec3>> NavMesh::GetSceneObstacleSlices(float buildPlaneY) const
 {
     std::vector<std::vector<glm::vec3>> allSlices;
+    const float radius = m_BuildParams.agentRadius;
     
     const std::vector<Vec3f> localCubeVerts = {
         {-0.5f, -0.5f, -0.5f}, // 0
@@ -426,7 +428,12 @@ std::vector<std::vector<glm::vec3>> NavMesh::GetSceneObstacleSlices(float buildP
         }
         
         if (buildPlaneY < minBounds.y || buildPlaneY > maxBounds.y)
-            continue; 
+            continue;
+
+        maxBounds.x += radius;
+        maxBounds.z += radius;
+        minBounds.x -= radius;
+        minBounds.z -= radius;
         
         std::vector<glm::vec3> sliceFootprint;
         const float y = buildPlaneY;
