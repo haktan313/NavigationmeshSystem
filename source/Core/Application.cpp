@@ -141,6 +141,43 @@ void Application::RenderImGui()
     if (ImGui::Button("Build NavMesh"))
         if (m_Scene && m_NavMesh)
             m_NavMesh->BuildNavMesh();
+    if (m_NavMesh)
+    {
+        ImGui::Text("NavMesh Build Parameters:");
+        NavBuildParams& params = m_NavMesh->m_BuildParams;
+        ImGui::SliderFloat("Agent Radius", &params.agentRadius, 0.1f, 5.0f);
+
+        ImGui::Text("Debug Draw Options:");
+        DrawDebugInfo& debugInfo = m_NavMesh->m_DebugInfo;
+        ImGui::Checkbox("Draw Border", &debugInfo.bDrawBorder);
+        ImGui::Checkbox("Draw Holes", &debugInfo.bDrawHoles);
+        ImGui::Checkbox("Fill Empty Areas", &debugInfo.bFillEmptyAreas);
+        ImGui::Checkbox("Draw Triangles", &debugInfo.bDrawTriangles);
+        ImGui::Checkbox("Draw Merged Polygons", &debugInfo.bDrawMergePolygons);
+        ImGui::Checkbox("Draw Twin Edges", &debugInfo.bDrawTwinEdges);
+        ImGui::Checkbox("Draw Removable Edges", &debugInfo.bDrawRemovableEdges);
+        ImGui::Checkbox("Draw Cannot Remove Edges", &debugInfo.bDrawCannotRemoveEdges);
+        if (debugInfo.bDrawTriangles)
+            debugInfo.bDrawMergePolygons = false;
+        if (debugInfo.bDrawMergePolygons)
+            debugInfo.bDrawTriangles = false;
+        if (debugInfo.bDrawTriangles || debugInfo.bDrawMergePolygons)
+            debugInfo.bFillEmptyAreas = false;
+        if (debugInfo.bFillEmptyAreas)
+        {
+            debugInfo.bDrawTriangles = false;
+            debugInfo.bDrawMergePolygons = false;
+        }
+
+        ImGui::Text("Pathfinding Info:");
+        if (m_NavMesh)
+        {
+            ImGui::InputFloat3("Start Position", &m_NavMesh->m_Start.x);
+            ImGui::InputFloat3("End Position", &m_NavMesh->m_End.x);
+            if (ImGui::Button("Update Start/End Markers"))
+                m_NavMesh->SetStartEndMarkers(m_NavMesh->m_Start, m_NavMesh->m_End);
+        }
+    }
 
     ImGui::End();
 

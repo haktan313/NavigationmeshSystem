@@ -44,6 +44,12 @@ void Scene::SetupDefaultScene()
     obstacleTransform2 = glm::translate(obstacleTransform2, glm::vec3(4.0f, 1.0f, 5.0f));
     obstacleTransform2 = glm::scale(obstacleTransform2, glm::vec3(2.0f, 2.0f, 2.0f));
     AddObject("Obstacle2", "Cube", obstacleTransform2);
+
+    // Another Box
+    glm::mat4 obstacleTransform3 = glm::mat4(1.0f);
+    obstacleTransform3 = glm::translate(obstacleTransform3, glm::vec3(0.0f, 0.0f, 2.0f));
+    obstacleTransform3 = glm::scale(obstacleTransform3, glm::vec3(7.0f, 2.0f, 2.0f));
+    AddObject("Obstacle3", "Cube", obstacleTransform3);
 }
 
 void Scene::Render(Shader* shader)
