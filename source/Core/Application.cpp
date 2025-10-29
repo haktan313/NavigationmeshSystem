@@ -144,11 +144,11 @@ void Application::RenderImGui()
     if (m_NavMesh)
     {
         ImGui::Text("NavMesh Build Parameters:");
-        NavBuildParams& params = m_NavMesh->m_BuildParams;
+        NavBuildParams& params = m_NavMesh->BuildParams;
         ImGui::SliderFloat("Agent Radius", &params.agentRadius, 0.1f, 5.0f);
 
         ImGui::Text("Debug Draw Options:");
-        DrawDebugInfo& debugInfo = m_NavMesh->m_DebugInfo;
+        DrawDebugInfo& debugInfo = m_NavMesh->DebugInfo;
         ImGui::Checkbox("Draw Border", &debugInfo.bDrawBorder);
         ImGui::Checkbox("Draw Holes", &debugInfo.bDrawHoles);
         ImGui::Checkbox("Fill Empty Areas", &debugInfo.bFillEmptyAreas);
@@ -172,10 +172,10 @@ void Application::RenderImGui()
         ImGui::Text("Pathfinding Info:");
         if (m_NavMesh)
         {
-            ImGui::InputFloat3("Start Position", &m_NavMesh->m_Start.x);
-            ImGui::InputFloat3("End Position", &m_NavMesh->m_End.x);
+            ImGui::InputFloat3("Start Position", &m_NavMesh->Start.x);
+            ImGui::InputFloat3("End Position", &m_NavMesh->End.x);
             if (ImGui::Button("Update Start/End Markers"))
-                m_NavMesh->SetStartEndMarkers(m_NavMesh->m_Start, m_NavMesh->m_End);
+                m_NavMesh->SetStartEndMarkers(m_NavMesh->Start, m_NavMesh->End);
         }
     }
 

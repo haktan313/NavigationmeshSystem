@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <deque>
 
+#include "Pathfinder.h"
+
 static bool IsItEqual(const glm::vec3& a, const glm::vec3& b, float epsilon = 1e-5f)
 {
     return glm::all(glm::epsilonEqual(a, b, epsilon));
@@ -13,7 +15,7 @@ static float CrossProductXZ(const glm::vec3& v1, const glm::vec3& v2)
     return v1.x * v2.z - v1.z * v2.x;
 }
 
-NavMesh::NavMesh(const Scene& scene) : m_NavMeshDebugger(nullptr), m_Scene(scene), m_Start(glm::vec3(0.f, 0.0f,0.0f)), m_End(glm::vec3(-1.f,0.0f,-1.0f))
+NavMesh::NavMesh(const Scene& scene) : m_NavMeshDebugger(nullptr), m_Scene(scene), Start(glm::vec3(0.f, 0.0f,0.0f)), End(glm::vec3(-1.f,0.0f,-1.0f)), m_FoundPathNodeIDs()
 {
     CreateDebugger();
     BuildBorderFromParams();
@@ -30,9 +32,9 @@ void NavMesh::BuildBorderFromParams()
 {
     m_BorderVerts3D.clear();
     
-    glm::vec3 origin = m_BuildParams.origin;
-    glm::vec3 maxBounds = m_BuildParams.maxBounds;
-    const float radius = m_BuildParams.agentRadius;
+    glm::vec3 origin = BuildParams.origin;
+    glm::vec3 maxBounds = BuildParams.maxBounds;
+    const float radius = BuildParams.agentRadius;
 
     glm::vec3 minPosition
     {
@@ -63,11 +65,11 @@ void NavMesh::BuildBorderFromParams()
 void NavMesh::BuildNavMesh()
 {
     m_NavMeshDebugger->CleanBuffers();
-    m_NavMeshDebugger->m_bNavMeshBuilt = true;
+    m_NavMeshDebugger->bNavMeshBuilt = true;
     m_NavMeshTriangles.clear();
     m_NavMeshDebugger->SetTrianglesFill(m_NavMeshTriangles);
     
-    const float buildPlaneY = std::min(m_BuildParams.origin.y, m_BuildParams.maxBounds.y);
+    const float buildPlaneY = std::min(BuildParams.origin.y, BuildParams.maxBounds.y);
     BuildBorderFromParams(); 
     m_NavMeshVerts3D = m_BorderVerts3D;
     std::vector<std::vector<glm::vec3>> obstacleSlices = GetSceneObstacleSlices(buildPlaneY);
@@ -85,6 +87,7 @@ void NavMesh::BuildNavMesh()
     EarClipping();
     CreateHalfEdgeStructure();
     OptimizeEarClipping();
+    SetStartEndMarkers(Start, End);
 }
 
 //----- Render the debug tool -----
@@ -92,22 +95,33 @@ void NavMesh::BuildNavMesh()
 void NavMesh::RenderDebugTool(Shader* shader, Camera& camera, const Scene& scene)
 {
     if (m_NavMeshDebugger)
-        m_NavMeshDebugger->RenderDebugTool(shader, camera, scene, m_DebugInfo);
+    {
+        m_NavMeshDebugger->RenderDebugTool(shader, camera, scene, DebugInfo);
+        if (m_FoundPathNodeIDs.size() > 0)
+            m_NavMeshDebugger->RenderPath(shader);
+    }
 }
 
 void NavMesh::CreateDebugger()
 {
     m_NavMeshDebugger = new NavMeshDebugger();
     if (m_NavMeshDebugger)
-        SetStartEndMarkers(m_Start, m_End);
+        SetStartEndMarkers(Start, End);
 }
 
 void NavMesh::SetStartEndMarkers(const glm::vec3& start, const glm::vec3& end)
 {
-    m_Start = start;
-    m_End = end;
+    Start = start;
+    End = end;
     if (m_NavMeshDebugger)
-        m_NavMeshDebugger->SetStartEndMarkers(m_Start, m_End);
+        m_NavMeshDebugger->SetStartEndMarkers(Start, End);
+    int startNodeID = FindNodeIDByPosition(Start);
+    int endNodeID = FindNodeIDByPosition(End);
+    std::cout << "Start Node ID: " << startNodeID << ", End Node ID: " << endNodeID << std::endl;
+    
+    m_FoundPathNodeIDs = Pathfinder::FindPath(*this, Start, End);
+    if (m_NavMeshDebugger && m_FoundPathNodeIDs.size() > 0)
+        m_NavMeshDebugger->SetPath(m_FoundPathNodeIDs, *this);
 }
 
 //----- Build Functions -----
@@ -284,7 +298,7 @@ void NavMesh::OptimizeEarClipping()
         return;
     
     std::vector<int> removableEdgeIndices;
-    FoundRemovableEdgeIndices(removableEdgeIndices);
+    FindRemovableEdgeIndices(removableEdgeIndices);
 
     MergeTriangles(removableEdgeIndices);
 
@@ -362,7 +376,7 @@ int NavMesh::FindHalfEdgeIndex(const glm::vec3& pos)
     return static_cast<int>(m_HalfEdgeVertices.size() - 1);
 }
 
-void NavMesh::FoundRemovableEdgeIndices(std::vector<int>& outRemovableEdgeIndices)
+void NavMesh::FindRemovableEdgeIndices(std::vector<int>& outRemovableEdgeIndices)
 {
     std::vector<glm::vec3> removableEdgeLines;
     std::vector<glm::vec3> essentialEdgeLines;
@@ -549,13 +563,23 @@ void NavMesh::FindNeighborsForPathfindingNodes(std::map<int, int>& faceIndexToNo
                     auto it = faceIndexToNodeIndex.find(neighborFaceOrigIndex);
                     if (it != faceIndexToNodeIndex.end())
                     {
-                        OptimizedEdge newNeighborEdge;
-                        newNeighborEdge.neighborFaceIndex = it->second;
-
-                        newNeighborEdge.edgeStart = m_HalfEdgeVertices[currentEdge.originVertexIndexID].position;
-                        newNeighborEdge.edgeEnd = m_HalfEdgeVertices[twinEdge.originVertexIndexID].position;
-                        
-                        node.neighbors.push_back(newNeighborEdge);
+                        int neighborNodeIndex = it->second;
+                        int currentNodeIndex = i;
+                        if (currentNodeIndex < neighborNodeIndex)
+                        {
+                            OptimizedEdge newCurrentEdge;
+                            newCurrentEdge.neighborFaceIndex = neighborNodeIndex;
+                            newCurrentEdge.edgeStart = m_HalfEdgeVertices[currentEdge.originVertexIndexID].position;
+                            newCurrentEdge.edgeEnd = m_HalfEdgeVertices[twinEdge.originVertexIndexID].position;
+                            node.neighbors.push_back(newCurrentEdge);
+                            
+                            OptimizedEdge newNeighborEdge;
+                            newNeighborEdge.neighborFaceIndex = currentNodeIndex;
+                            newNeighborEdge.edgeStart = m_HalfEdgeVertices[twinEdge.originVertexIndexID].position;
+                            newNeighborEdge.edgeEnd = m_HalfEdgeVertices[currentEdge.originVertexIndexID].position;
+                            
+                            m_PathfindingNodes[neighborNodeIndex].neighbors.push_back(newNeighborEdge);
+                        }
                     }
                 }
             }
@@ -566,6 +590,45 @@ void NavMesh::FindNeighborsForPathfindingNodes(std::map<int, int>& faceIndexToNo
     }
 
     std::cout << "Populated neighbors for all " << m_PathfindingNodes.size() << " nodes." << std::endl;
+}
+
+int NavMesh::FindNodeIDByPosition(const glm::vec3& position)
+{
+    for (int i = 0; i < m_PathfindingNodes.size(); ++i)
+    {
+        const auto& node = m_PathfindingNodes[i];
+        if (node.polygonVerts.size() < 3)
+            continue;
+        const glm::vec3& verticies0 = node.polygonVerts[0];
+        for (size_t j = 1; j < node.polygonVerts.size() - 1; ++j)
+        {
+            const glm::vec3& verticies1 = node.polygonVerts[j];
+            const glm::vec3& verticies2 = node.polygonVerts[j + 1];
+            if (IsPointInTriangleXZ(position, verticies0, verticies1, verticies2))
+            {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+glm::vec3 NavMesh::GetNodeCenter(int nodeID)
+{
+    if (nodeID >= 0 && nodeID < m_PathfindingNodes.size())
+    {
+        return m_PathfindingNodes[nodeID].centerPoint;
+    }
+    return glm::vec3(0.0f);
+}
+
+const std::vector<OptimizedEdge>& NavMesh::GetNodeNeighbors(int nodeID)
+{
+    if (nodeID >= 0 && nodeID < m_PathfindingNodes.size())
+        return m_PathfindingNodes[nodeID].neighbors;
+    
+    static const std::vector<OptimizedEdge> s_emptyNeighbors;
+    return s_emptyNeighbors;
 }
 
 //----- Raycasting Functions -----
@@ -662,7 +725,7 @@ bool NavMesh::RaycastXZ(const std::vector<glm::vec3>& vertices, const glm::vec3&
 std::vector<std::vector<glm::vec3>> NavMesh::GetSceneObstacleSlices(float buildPlaneY) const
 {
     std::vector<std::vector<glm::vec3>> allSlices;
-    const float radius = m_BuildParams.agentRadius;
+    const float radius = BuildParams.agentRadius;
     
     const std::vector<Vec3f> localCubeVerts = {
         {-0.5f, -0.5f, -0.5f}, // 0

@@ -6,7 +6,7 @@ NavMeshDebugger::NavMeshDebugger()
     :  m_BorderVAO(0), m_BorderVBO(0), m_BorderCount(0), m_TriangleVAO(0), m_TriangleVBO(0), m_TriangleCount(0), m_EarClipingVAO(0), m_EarClippingVBO(0),
         m_EarClipCount(0), m_MergedPolygonFillVAO(0), m_MergedPolygonFillVBO(0), m_TwinEdgeVAO(0), m_TwinEdgeVBO(0), m_TwinEdgeCount(0), m_RemovableEdgeVAO(0),
             m_RemovableEdgeVBO(0), m_RemovableEdgeCount(0), m_CannotRemoveEdgeVAO(0), m_CannotRemoveEdgeVBO(0), m_CannotRemoveEdgeCount(0),
-                m_StartEndMarkerCount(0), m_StartEndMarkerVAO(0), m_StartEndMarkerVBO(0)
+                m_StartEndMarkerCount(0), m_StartEndMarkerVAO(0), m_StartEndMarkerVBO(0), m_PathPointCount(0), m_PathPointVAO(0), m_PathPointVBO(0), bNavMeshBuilt(false)
 {
 
 }
@@ -49,6 +49,15 @@ void NavMeshDebugger::CleanBuffers()
         glDeleteVertexArrays(1, &m_CannotRemoveEdgeVAO);
     if (m_CannotRemoveEdgeVBO)
         glDeleteBuffers(1, &m_CannotRemoveEdgeVBO);
+
+    if (m_StartEndMarkerVAO)
+        glDeleteVertexArrays(1, &m_StartEndMarkerVAO);
+    if (m_StartEndMarkerVBO)
+        glDeleteBuffers(1, &m_StartEndMarkerVBO);
+    if (m_PathPointVAO)
+        glDeleteVertexArrays(1, &m_PathPointVAO);
+    if (m_PathPointVBO)
+        glDeleteBuffers(1, &m_PathPointVBO);
 }
 
 void NavMeshDebugger::RenderDebugTool(Shader* shader, Camera& camera, const Scene& scene, const DrawDebugInfo& debugInfo)
@@ -63,7 +72,7 @@ void NavMeshDebugger::RenderDebugTool(Shader* shader, Camera& camera, const Scen
 
     if (debugInfo.bDrawBorder)
         RenderBorder(shader);
-    if (!m_bNavMeshBuilt)
+    if (!bNavMeshBuilt)
         return;
     if (debugInfo.bDrawHoles)
         RenderHoles(shader);
@@ -538,5 +547,54 @@ void NavMeshDebugger::RenderStartEndMarkers(Shader* shader)
 
         glBindVertexArray(0);
         glLineWidth(1.f);
+    }
+}
+
+void NavMeshDebugger::SetPath(const std::vector<int>& nodeIDs, NavMesh& navMesh)
+{
+    if (nodeIDs.size() < 2)
+    {
+        m_PathPointCount = 0;
+        return;
+    }
+    
+    std::vector<glm::vec3> pathPoints;
+    for (int nodeID : nodeIDs)
+        pathPoints.push_back(navMesh.GetNodeCenter(nodeID));
+    
+    m_PathPointCount = static_cast<GLsizei>(pathPoints.size());
+
+    if (m_PathPointVAO == 0)
+    {
+        glGenVertexArrays(1, &m_PathPointVAO);
+        glGenBuffers(1, &m_PathPointVBO);
+    }
+
+    glBindVertexArray(m_PathPointVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_PathPointVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * m_PathPointCount, pathPoints.data(), GL_DYNAMIC_DRAW);
+
+    glEnableVertexAttribArray(0); // position
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+
+    glBindVertexArray(0);
+}
+
+void NavMeshDebugger::RenderPath(Shader* shader)
+{
+    if (m_PathPointVAO && m_PathPointCount > 0)
+    {
+        shader->setVec4("ourColor", glm::vec4(1.0f, 1.0f, 0.0f, 1.0f));
+        glLineWidth(4.f); 
+        
+        glBindVertexArray(m_PathPointVAO);
+        glDrawArrays(GL_LINE_STRIP, 0, m_PathPointCount);
+        
+        glPointSize(10.f);
+        glDrawArrays(GL_POINTS, 0, m_PathPointCount);
+        
+        glBindVertexArray(0);
+        glLineWidth(1.f);
+        glPointSize(1.f);
     }
 }

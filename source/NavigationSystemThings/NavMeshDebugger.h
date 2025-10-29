@@ -5,11 +5,12 @@
 
 struct NavMeshTriangle;
 struct DrawDebugInfo;
+class NavMesh;
 
 class NavMeshDebugger
 {
 public:
-    bool m_bNavMeshBuilt = false;
+    bool bNavMeshBuilt = false;
     NavMeshDebugger();
     ~NavMeshDebugger();
     void CleanBuffers();
@@ -41,6 +42,9 @@ public:
 
     void SetStartEndMarkers(const glm::vec3& start, const glm::vec3& end);
     void RenderStartEndMarkers(Shader* shader);
+
+    void SetPath(const std::vector<int>& nodeIDs, NavMesh& navMesh);
+    void RenderPath(Shader* shader);
 private:
     GLsizei m_BorderCount;
     std::vector<GLsizei> m_HoleCounts;
@@ -54,6 +58,7 @@ private:
     GLsizei m_CannotRemoveEdgeCount;
 
     GLsizei m_StartEndMarkerCount;
+    GLsizei m_PathPointCount;
     
     unsigned int m_BorderVAO, m_BorderVBO;
     std::vector<unsigned int> m_HoleVAOs;
@@ -67,4 +72,5 @@ private:
     unsigned int m_CannotRemoveEdgeVAO, m_CannotRemoveEdgeVBO;
 
     unsigned int m_StartEndMarkerVAO, m_StartEndMarkerVBO;
+    unsigned int m_PathPointVAO, m_PathPointVBO;
 };
