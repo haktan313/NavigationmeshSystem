@@ -6,58 +6,124 @@ NavMeshDebugger::NavMeshDebugger()
     :  m_BorderVAO(0), m_BorderVBO(0), m_BorderCount(0), m_TriangleVAO(0), m_TriangleVBO(0), m_TriangleCount(0), m_EarClipingVAO(0), m_EarClippingVBO(0),
         m_EarClipCount(0), m_MergedPolygonFillVAO(0), m_MergedPolygonFillVBO(0), m_TwinEdgeVAO(0), m_TwinEdgeVBO(0), m_TwinEdgeCount(0), m_RemovableEdgeVAO(0),
             m_RemovableEdgeVBO(0), m_RemovableEdgeCount(0), m_CannotRemoveEdgeVAO(0), m_CannotRemoveEdgeVBO(0), m_CannotRemoveEdgeCount(0),
-                m_StartEndMarkerCount(0), m_StartEndMarkerVAO(0), m_StartEndMarkerVBO(0), m_PathPointCount(0), m_PathPointVAO(0), m_PathPointVBO(0), bNavMeshBuilt(false)
+                m_StartEndMarkerCount(0), m_StartEndMarkerVAO(0), m_StartEndMarkerVBO(0), m_PathPointCount(0), m_PathPointVAO(0), m_PathPointVBO(0), m_MergedPolygonFillCount(0)
 {
 
 }
 
 NavMeshDebugger::~NavMeshDebugger()
 {
+    if (m_BorderVAO)
+    {
+        glDeleteVertexArrays(1, &m_BorderVAO);
+        m_BorderVAO = 0;
+    }
+    if (m_BorderVBO)
+    {
+        glDeleteBuffers(1, &m_BorderVBO);
+        m_BorderVBO = 0;
+    }
+    m_BorderCount = 0;
     CleanBuffers();
 }
+
 void NavMeshDebugger::CleanBuffers()
 {
-    if (m_BorderVAO)
-        glDeleteVertexArrays(1, &m_BorderVAO);
-    if (m_BorderVBO)
-        glDeleteBuffers(1, &m_BorderVBO);
     for (auto vao : m_HoleVAOs)
         glDeleteVertexArrays(1, &vao);
+    m_HoleVAOs.clear();
     if (m_TriangleVAO)
+    {
         glDeleteVertexArrays(1, &m_TriangleVAO);
+        m_TriangleVAO = 0;
+    }
     if (m_TriangleVBO)
+    {
         glDeleteBuffers(1, &m_TriangleVBO);
+        m_TriangleVBO = 0;
+    }
+    m_TriangleCount = 0;
     
-    glDeleteVertexArrays(1, &m_EarClipingVAO);
-    glDeleteBuffers(1, &m_EarClippingVBO);
+    if (m_EarClipingVAO)
+    {
+        glDeleteVertexArrays(1, &m_EarClipingVAO);
+        m_EarClipingVAO = 0;
+    }
+    if (m_EarClippingVBO)
+    {
+        glDeleteBuffers(1, &m_EarClippingVBO);
+        m_EarClippingVBO = 0;
+    }
+    m_EarClipCount = 0;
+    
     for (auto vao : m_MergedPolygonVAOs)
         glDeleteVertexArrays(1, &vao);
+    m_MergedPolygonVAOs.clear();
     if (m_MergedPolygonFillVAO)
+    {
         glDeleteVertexArrays(1, &m_MergedPolygonFillVAO);
+        m_MergedPolygonFillVAO = 0;
+    }
     if (m_MergedPolygonFillVBO)
+    {
         glDeleteBuffers(1, &m_MergedPolygonFillVBO);
+        m_MergedPolygonFillVBO = 0;
+    }
     
     if (m_TwinEdgeVAO)
+    {
         glDeleteVertexArrays(1, &m_TwinEdgeVAO);
+        m_TwinEdgeVAO = 0;
+    }
     if (m_TwinEdgeVBO)
+    {
         glDeleteBuffers(1, &m_TwinEdgeVBO);
+        m_TwinEdgeVBO = 0;
+    }
+    m_TwinEdgeCount = 0;
     if (m_RemovableEdgeVAO)
+    {
         glDeleteVertexArrays(1, &m_RemovableEdgeVAO);
+        m_RemovableEdgeVAO = 0;
+    }
     if (m_RemovableEdgeVBO)
+    {
         glDeleteBuffers(1, &m_RemovableEdgeVBO);
+        m_RemovableEdgeVBO = 0;
+    }
     if (m_CannotRemoveEdgeVAO)
+    {
         glDeleteVertexArrays(1, &m_CannotRemoveEdgeVAO);
+        m_CannotRemoveEdgeVAO = 0;
+    }
     if (m_CannotRemoveEdgeVBO)
+    {
         glDeleteBuffers(1, &m_CannotRemoveEdgeVBO);
+        m_CannotRemoveEdgeVBO = 0;
+    }
 
     if (m_StartEndMarkerVAO)
+    {
         glDeleteVertexArrays(1, &m_StartEndMarkerVAO);
+        m_StartEndMarkerVAO = 0;
+    }
     if (m_StartEndMarkerVBO)
+    {
         glDeleteBuffers(1, &m_StartEndMarkerVBO);
+        m_StartEndMarkerVBO = 0;
+    }
+    m_StartEndMarkerCount = 0;
     if (m_PathPointVAO)
+    {
         glDeleteVertexArrays(1, &m_PathPointVAO);
+        m_PathPointVAO = 0;
+    }
     if (m_PathPointVBO)
+    {
         glDeleteBuffers(1, &m_PathPointVBO);
+        m_PathPointVBO = 0;
+    }
+    m_PathPointCount = 0;
 }
 
 void NavMeshDebugger::RenderDebugTool(Shader* shader, Camera& camera, const Scene& scene, const DrawDebugInfo& debugInfo)
@@ -307,7 +373,7 @@ void NavMeshDebugger::SetMergePolygons(const std::vector<std::vector<glm::vec3>>
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * count, polygonVerts.data(), GL_DYNAMIC_DRAW);
 
-        glEnableVertexAttribArray(0); // position
+        glEnableVertexAttribArray(0); 
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
 
         glBindVertexArray(0);
@@ -374,7 +440,7 @@ void NavMeshDebugger::SetMergePolygonsFill(const std::vector<std::vector<glm::ve
     glBindBuffer(GL_ARRAY_BUFFER, m_MergedPolygonFillVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * m_MergedPolygonFillCount, fillTriangles.data(), GL_DYNAMIC_DRAW);
     
-    glEnableVertexAttribArray(0); // position
+    glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
     
     glBindVertexArray(0);
@@ -444,7 +510,7 @@ void NavMeshDebugger::SetRemovableEdges(const std::vector<glm::vec3>& removableE
     glBindBuffer(GL_ARRAY_BUFFER, m_RemovableEdgeVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * m_RemovableEdgeCount, removableEdgeVerts.data(), GL_DYNAMIC_DRAW);
 
-    glEnableVertexAttribArray(0); // position
+    glEnableVertexAttribArray(0); 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
 
     glBindVertexArray(0);
@@ -479,7 +545,7 @@ void NavMeshDebugger::SetCannotRemoveEdges(const std::vector<glm::vec3>& cannotR
     glBindBuffer(GL_ARRAY_BUFFER, m_CannotRemoveEdgeVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * m_CannotRemoveEdgeCount, cannotRemoveEdgeVerts.data(), GL_DYNAMIC_DRAW);
 
-    glEnableVertexAttribArray(0); // position
+    glEnableVertexAttribArray(0); 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
 
     glBindVertexArray(0);
@@ -560,7 +626,7 @@ void NavMeshDebugger::SetPath(const std::vector<int>& nodeIDs, NavMesh& navMesh)
     
     std::vector<glm::vec3> pathPoints;
     for (int nodeID : nodeIDs)
-        pathPoints.push_back(navMesh.GetNodeCenter(nodeID));
+        pathPoints.push_back(NavigationUtility::GetNodeCenter(nodeID, navMesh));
     
     m_PathPointCount = static_cast<GLsizei>(pathPoints.size());
 
@@ -574,7 +640,7 @@ void NavMeshDebugger::SetPath(const std::vector<int>& nodeIDs, NavMesh& navMesh)
     glBindBuffer(GL_ARRAY_BUFFER, m_PathPointVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec3) * m_PathPointCount, pathPoints.data(), GL_DYNAMIC_DRAW);
 
-    glEnableVertexAttribArray(0); // position
+    glEnableVertexAttribArray(0); 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
 
     glBindVertexArray(0);

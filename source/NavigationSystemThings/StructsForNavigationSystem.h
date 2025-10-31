@@ -14,18 +14,11 @@ struct NavMeshTriangle
 };
 struct NavMeshHitInfo
 {
-    float lambda = 0.0f;
-    glm::vec3 intersectPoint = glm::vec3(0.0f);
-    glm::vec3 normal = glm::vec3(0.0f);
-
-    glm::vec3 firstPointOfIntersectedLine = glm::vec3(0.0f);
-    glm::vec3 secondPointOfIntersectedLine = glm::vec3(0.0f);
-
-    glm::vec3 rayStartPoint = glm::vec3(0.0f);
-    glm::vec3 rayEndPoint = glm::vec3(0.0f);
+    float proccessOnRay = 0.0f;
+    glm::vec3 hitPoint = glm::vec3(0.0f);
 };
 
-struct HalfEdgeVertex
+struct HalfEdgeVertex 
 {
     glm::vec3 position;
     int halfEdgeIndex = -1; // Index of one of the half-edges originating from this vertex
@@ -37,10 +30,10 @@ struct HalfEdgeFace
 };
 struct HalfEdge
 {
-    int originVertexIndexID = -1;
-    int twinHalfEdgeIndexID = -1;
-    int nextHalfEdgeIndexID = -1;
-    int faceIndexID = -1;
+    int originVertexIndex = -1;
+    int nextHalfEdgeIndex = -1;
+    int faceID = -1;
+    int twinHalfEdgeIndex = -1;
 };
 
 struct OptimizedEdge

@@ -5,17 +5,9 @@
 
 #include "Pathfinder.h"
 
-static bool IsItEqual(const glm::vec3& a, const glm::vec3& b, float epsilon = 1e-5f)
-{
-    return glm::all(glm::epsilonEqual(a, b, epsilon));
-}
-static float CrossProductXZ(const glm::vec3& v1, const glm::vec3& v2)
-{
-    // (x1*z2 - z1*x2) -> (x1*y2 - y1*x2) 
-    return v1.x * v2.z - v1.z * v2.x;
-}
 
-NavMesh::NavMesh(const Scene& scene) : m_NavMeshDebugger(nullptr), m_Scene(scene), Start(glm::vec3(0.f, 0.0f,0.0f)), End(glm::vec3(-1.f,0.0f,-1.0f)), m_FoundPathNodeIDs()
+NavMesh::NavMesh(const Scene& scene)
+    : m_NavMeshDebugger(nullptr), m_Scene(scene), Start(glm::vec3(0.f, 0.0f,0.0f)), End(glm::vec3(-1.f,0.0f,-1.0f))
 {
     CreateDebugger();
     BuildBorderFromParams();
@@ -27,6 +19,71 @@ NavMesh::~NavMesh()
     m_NavMeshDebugger = nullptr;
     
 }
+
+void NavMesh::BuildNavMesh()
+{
+    m_HalfEdges.clear();
+    m_HalfEdgeFaces.clear();
+    m_HalfEdgeVertices.clear();
+    m_NavMeshTriangles.clear();
+    m_PathfindingNodes.clear();
+    m_FoundPathNodeIDs.clear();
+    m_NavMeshVerts3D.clear();
+    m_NavMeshVerts3D = m_BorderVerts3D;
+    
+    m_NavMeshDebugger->CleanBuffers();
+    m_NavMeshDebugger->bNavMeshBuilt = true;
+    
+    const float buildPlaneY = std::min(BuildParams.origin.y, BuildParams.maxBounds.y);
+    std::vector<std::vector<glm::vec3>> obstacleSlices = NavigationUtility::GetSceneObstacleSlices(buildPlaneY, BuildParams, m_Scene);
+    NavigationUtility::SortObstaclesByMaxX(obstacleSlices);
+    for (const auto& slice : obstacleSlices)
+        NavigationUtility::CreateHolesWithObstacles(slice, m_NavMeshVerts3D, BuildParams);
+    
+    EarClipping();
+    CreateHalfEdgeStructure();
+    OptimizeEarClipping();// hertel mehlhorn
+    SetStartEndMarkers(Start, End);
+    if (m_NavMeshDebugger)
+        m_NavMeshDebugger->SetHoles(obstacleSlices);
+}
+
+//----- Render the debug tool -----
+
+void NavMesh::RenderDebugTool(Shader* shader, Camera& camera, const Scene& scene)
+{
+    if (m_NavMeshDebugger)
+    {
+        m_NavMeshDebugger->RenderDebugTool(shader, camera, scene, DebugInfo);
+        if (m_FoundPathNodeIDs.size() > 0)
+            m_NavMeshDebugger->RenderPath(shader);
+    }
+}
+
+void NavMesh::CreateDebugger()
+{
+    if (!m_NavMeshDebugger)
+        m_NavMeshDebugger = new NavMeshDebugger();
+    if (m_NavMeshDebugger)
+        SetStartEndMarkers(Start, End);
+}
+
+void NavMesh::SetStartEndMarkers(const glm::vec3& start, const glm::vec3& end)
+{
+    Start = start;
+    End = end;
+    if (m_NavMeshDebugger)
+        m_NavMeshDebugger->SetStartEndMarkers(Start, End);
+    int startNodeID = NavigationUtility::FindNodeIDByPosition(Start, *this);
+    int endNodeID = NavigationUtility::FindNodeIDByPosition(End, *this);
+    std::cout << "Start Node ID: " << startNodeID << ", End Node ID: " << endNodeID << std::endl;
+    
+    m_FoundPathNodeIDs = Pathfinder::FindPath(*this, Start, End);
+    if (m_NavMeshDebugger && m_FoundPathNodeIDs.size() > 0)
+        m_NavMeshDebugger->SetPath(m_FoundPathNodeIDs, *this);
+}
+
+//----- Build Functions -----
 
 void NavMesh::BuildBorderFromParams()
 {
@@ -62,83 +119,19 @@ void NavMesh::BuildBorderFromParams()
     m_NavMeshVerts3D = m_BorderVerts3D;
 }
 
-void NavMesh::BuildNavMesh()
-{
-    m_NavMeshDebugger->CleanBuffers();
-    m_NavMeshDebugger->bNavMeshBuilt = true;
-    m_NavMeshTriangles.clear();
-    m_NavMeshDebugger->SetTrianglesFill(m_NavMeshTriangles);
-    
-    const float buildPlaneY = std::min(BuildParams.origin.y, BuildParams.maxBounds.y);
-    BuildBorderFromParams(); 
-    m_NavMeshVerts3D = m_BorderVerts3D;
-    std::vector<std::vector<glm::vec3>> obstacleSlices = GetSceneObstacleSlices(buildPlaneY);
-
-    if (m_NavMeshDebugger)
-    {
-        m_NavMeshDebugger->SetHoles(obstacleSlices);
-    }
-    
-    SortObstaclesByMaxX(obstacleSlices);
-    for (const auto& slice : obstacleSlices)
-        InsertObstacle(slice);
-    
-    //m_NavMeshDebugger->SetBorderVertices(m_NavMeshVerts3D);
-    EarClipping();
-    CreateHalfEdgeStructure();
-    OptimizeEarClipping();
-    SetStartEndMarkers(Start, End);
-}
-
-//----- Render the debug tool -----
-
-void NavMesh::RenderDebugTool(Shader* shader, Camera& camera, const Scene& scene)
-{
-    if (m_NavMeshDebugger)
-    {
-        m_NavMeshDebugger->RenderDebugTool(shader, camera, scene, DebugInfo);
-        if (m_FoundPathNodeIDs.size() > 0)
-            m_NavMeshDebugger->RenderPath(shader);
-    }
-}
-
-void NavMesh::CreateDebugger()
-{
-    m_NavMeshDebugger = new NavMeshDebugger();
-    if (m_NavMeshDebugger)
-        SetStartEndMarkers(Start, End);
-}
-
-void NavMesh::SetStartEndMarkers(const glm::vec3& start, const glm::vec3& end)
-{
-    Start = start;
-    End = end;
-    if (m_NavMeshDebugger)
-        m_NavMeshDebugger->SetStartEndMarkers(Start, End);
-    int startNodeID = FindNodeIDByPosition(Start);
-    int endNodeID = FindNodeIDByPosition(End);
-    std::cout << "Start Node ID: " << startNodeID << ", End Node ID: " << endNodeID << std::endl;
-    
-    m_FoundPathNodeIDs = Pathfinder::FindPath(*this, Start, End);
-    if (m_NavMeshDebugger && m_FoundPathNodeIDs.size() > 0)
-        m_NavMeshDebugger->SetPath(m_FoundPathNodeIDs, *this);
-}
-
-//----- Build Functions -----
-
 void NavMesh::EarClipping()
 {
     bool bClippedEar = false;
-    //std::vector<glm::vec3> connections;
+    
     while (m_NavMeshVerts3D.size() >= 3)
     {
         bClippedEar = false;
-        for (int i = 0; i < m_NavMeshVerts3D.size(); i++)
+        for (int i = 0; i < static_cast<int>(m_NavMeshVerts3D.size()); i++)
         {
             int prevIndex = i - 1;
             if (prevIndex < 0)
-                prevIndex += m_NavMeshVerts3D.size();
-            int nextIndex = (i + 1) % m_NavMeshVerts3D.size();
+                prevIndex += static_cast<int>(m_NavMeshVerts3D.size());
+            int nextIndex = (i + 1) % static_cast<int>(m_NavMeshVerts3D.size());
 
             std::vector<glm::vec2> triangleDummy
             {
@@ -152,15 +145,10 @@ void NavMesh::EarClipping()
             
             if (cross > 0.f)
             {
-                if (CanClipEar(prevIndex, i, nextIndex, m_NavMeshVerts3D))
+                if (NavigationUtility::CanClipEar(prevIndex, i, nextIndex, m_NavMeshVerts3D))
                 {
                     if (m_NavMeshDebugger)
                     {
-                        std::vector<glm::vec3> connection
-                        {
-                            m_NavMeshVerts3D[prevIndex],
-                            m_NavMeshVerts3D[nextIndex]
-                        };
                         NavMeshTriangle triangle = 
                         {
                             m_NavMeshVerts3D[prevIndex],
@@ -168,7 +156,6 @@ void NavMesh::EarClipping()
                             m_NavMeshVerts3D[nextIndex]
                         };
                         m_NavMeshTriangles.push_back(triangle);
-                        //connections.insert(connections.end(), connection.begin(), connection.end());
                     }
                     bClippedEar = true;
                     m_NavMeshVerts3D.erase(m_NavMeshVerts3D.begin() + i);
@@ -183,7 +170,6 @@ void NavMesh::EarClipping()
             return;
         }
     }
-    //m_NavMeshDebugger->SetEarClipping(connections);
     m_NavMeshDebugger->SetTrianglesFill(m_NavMeshTriangles);
 }
 
@@ -195,93 +181,75 @@ void NavMesh::CreateHalfEdgeStructure()
 
     for (const auto& triangle : m_NavMeshTriangles)
     {
-        int vertex0Index = FindHalfEdgeIndex(triangle.verts[0]);
-        int vertex1Index = FindHalfEdgeIndex(triangle.verts[1]);
-        int vertex2Index = FindHalfEdgeIndex(triangle.verts[2]);
+        int vertex0Index = NavigationUtility::FindOrCreateHalfEdgeVertexIndex(triangle.verts[0], m_HalfEdgeVertices);
+        int vertex1Index = NavigationUtility::FindOrCreateHalfEdgeVertexIndex(triangle.verts[1], m_HalfEdgeVertices);
+        int vertex2Index = NavigationUtility::FindOrCreateHalfEdgeVertexIndex(triangle.verts[2], m_HalfEdgeVertices);
 
         m_HalfEdgeFaces.push_back(HalfEdgeFace());
-        int faceIndex = static_cast<int>(m_HalfEdgeFaces.size() - 1);
         HalfEdgeFace& newFace = m_HalfEdgeFaces.back();
+        int faceIndex = static_cast<int>(m_HalfEdgeFaces.size() - 1);
 
-        m_HalfEdges.push_back(HalfEdge());
-        int halfEdge0Index = static_cast<int>(m_HalfEdges.size() - 1);
-        m_HalfEdges.push_back(HalfEdge());
-        int halfEdge1Index = static_cast<int>(m_HalfEdges.size() - 1);
-        m_HalfEdges.push_back(HalfEdge());
-        int halfEdge2Index = static_cast<int>(m_HalfEdges.size() - 1);
-
-        HalfEdge& halfEdge0 = m_HalfEdges[halfEdge0Index];
-        halfEdge0.originVertexIndexID = vertex0Index;
-        halfEdge0.nextHalfEdgeIndexID = halfEdge1Index;
-        halfEdge0.faceIndexID = faceIndex;
-
-        HalfEdge& halfEdge1 = m_HalfEdges[halfEdge1Index];
-        halfEdge1.originVertexIndexID = vertex1Index;
-        halfEdge1.nextHalfEdgeIndexID = halfEdge2Index;
-        halfEdge1.faceIndexID = faceIndex;
-
-        HalfEdge& halfEdge2 = m_HalfEdges[halfEdge2Index];
-        halfEdge2.originVertexIndexID = vertex2Index;
-        halfEdge2.nextHalfEdgeIndexID = halfEdge0Index;
-        halfEdge2.faceIndexID = faceIndex;
-
-        newFace.halfEdgeIndex = halfEdge0Index;
-
+        newFace.halfEdgeIndex = static_cast<int>(m_HalfEdges.size());
+        m_HalfEdges.push_back(HalfEdge({vertex0Index, static_cast<int>(m_HalfEdges.size()) + 1, faceIndex}));
         if (m_HalfEdgeVertices[vertex0Index].halfEdgeIndex == -1)
-            m_HalfEdgeVertices[vertex0Index].halfEdgeIndex = halfEdge0Index;
+            m_HalfEdgeVertices[vertex0Index].halfEdgeIndex = static_cast<int>(m_HalfEdges.size());
+        
+        m_HalfEdges.push_back(HalfEdge({vertex1Index, static_cast<int>(m_HalfEdges.size()) + 1, faceIndex}));
         if (m_HalfEdgeVertices[vertex1Index].halfEdgeIndex == -1)
-            m_HalfEdgeVertices[vertex1Index].halfEdgeIndex = halfEdge1Index;
+            m_HalfEdgeVertices[vertex1Index].halfEdgeIndex = static_cast<int>(m_HalfEdges.size());
+        
+        m_HalfEdges.push_back(HalfEdge({vertex2Index, static_cast<int>(m_HalfEdges.size()) - 2, faceIndex}));
         if (m_HalfEdgeVertices[vertex2Index].halfEdgeIndex == -1)
-            m_HalfEdgeVertices[vertex2Index].halfEdgeIndex = halfEdge2Index;
+            m_HalfEdgeVertices[vertex2Index].halfEdgeIndex = static_cast<int>(m_HalfEdges.size());
     }
-    std::cout << "Half-Edge structure created with " << m_HalfEdgeVertices.size() << " vertices, "
-              << m_HalfEdges.size() << " half-edges, and " << m_HalfEdgeFaces.size() << " faces." << std::endl;
+    std::cout << "Half-Edge structure created with " << m_HalfEdgeVertices.size() << " vertices, " << m_HalfEdges.size() << " half-edges, and " << m_HalfEdgeFaces.size() << " faces." << std::endl;
     FindTwinHalfEdges();
 }
 
 void NavMesh::FindTwinHalfEdges()
 {
     std::map<std::pair<int, int>, int> edgeMap; // Key: (start, end vertex), Value: halfEdgeIndex
-    for (size_t i = 0; i < m_HalfEdges.size(); ++i)
+    for (int i = 0; i < static_cast<int>(m_HalfEdges.size()); i++)
     {
         const HalfEdge& halfEdge = m_HalfEdges[i];
-        int endVertexIndex = m_HalfEdges[halfEdge.nextHalfEdgeIndexID].originVertexIndexID;
-        edgeMap[{halfEdge.originVertexIndexID, endVertexIndex}] = static_cast<int>(i);
+        int endVertexIndex = m_HalfEdges[halfEdge.nextHalfEdgeIndex].originVertexIndex;
+        edgeMap[{halfEdge.originVertexIndex, endVertexIndex}] = i;
     }
     
     int twinCount = 0;
-    for (size_t i = 0; i < m_HalfEdges.size(); ++i)
+    for (int i = 0; i < static_cast<int>(m_HalfEdges.size()); i++)
     {
         HalfEdge& halfEdge = m_HalfEdges[i];
-        if (halfEdge.twinHalfEdgeIndexID != -1)
+        if (halfEdge.twinHalfEdgeIndex != -1)
             continue; // already assigned
-        int endVertexIndex = m_HalfEdges[halfEdge.nextHalfEdgeIndexID].originVertexIndexID;
+        int endVertexIndex = m_HalfEdges[halfEdge.nextHalfEdgeIndex].originVertexIndex;
         
-        auto twinValue = edgeMap.find({endVertexIndex, halfEdge.originVertexIndexID});
+        auto twinValue = edgeMap.find({endVertexIndex, halfEdge.originVertexIndex});
         if (twinValue != edgeMap.end())
         {
             int twinIndex = twinValue->second;
             HalfEdge& twinHalfEdge = m_HalfEdges[twinIndex];
-            halfEdge.twinHalfEdgeIndexID = twinIndex;
-            twinHalfEdge.twinHalfEdgeIndexID = static_cast<int>(i);
+            halfEdge.twinHalfEdgeIndex = twinIndex;
+            twinHalfEdge.twinHalfEdgeIndex = i;
             twinCount++;
         }
     }
     std::cout << "Found and assigned " << twinCount << " twin half-edges." << std::endl;
-    
+
+    //For debugging
     std::vector<glm::vec3> internalEdgesLines;
-    for (size_t i = 0; i < m_HalfEdges.size(); ++i)
+    for (int i = 0; i < static_cast<int>(m_HalfEdges.size()); ++i)
     {
         const HalfEdge& halfEdge = m_HalfEdges[i];
         
-        if (halfEdge.twinHalfEdgeIndexID != -1)
+        if (halfEdge.twinHalfEdgeIndex != -1)
         {
-            if (i < halfEdge.twinHalfEdgeIndexID)
+            if (i < halfEdge.twinHalfEdgeIndex)
             {
-                const glm::vec3& p1 = m_HalfEdgeVertices[halfEdge.originVertexIndexID].position;
+                const glm::vec3& p1 = m_HalfEdgeVertices[halfEdge.originVertexIndex].position;
                 
-                const HalfEdge& nextHalfEdge = m_HalfEdges[halfEdge.nextHalfEdgeIndexID];
-                const glm::vec3& p2 = m_HalfEdgeVertices[nextHalfEdge.originVertexIndexID].position;
+                const HalfEdge& nextHalfEdge = m_HalfEdges[halfEdge.nextHalfEdgeIndex];
+                const glm::vec3& p2 = m_HalfEdgeVertices[nextHalfEdge.originVertexIndex].position;
     
                 internalEdgesLines.push_back(p1);
                 internalEdgesLines.push_back(p2);
@@ -294,13 +262,13 @@ void NavMesh::FindTwinHalfEdges()
 
 void NavMesh::OptimizeEarClipping()
 {
-    if (m_HalfEdges.empty() || !m_NavMeshDebugger)
+    if (m_HalfEdges.empty())
         return;
     
-    std::vector<int> removableEdgeIndices;
-    FindRemovableEdgeIndices(removableEdgeIndices);
+    std::vector<int> removableEdgeIndexes;
+    NavigationUtility::FindRemovableEdgeIndexes(removableEdgeIndexes, m_HalfEdges, m_HalfEdgeVertices, m_NavMeshDebugger);
 
-    MergeTriangles(removableEdgeIndices);
+    MergeTriangles(removableEdgeIndexes);
 
     std::map<int, int> faceIndexToNodeIndex;
     std::vector<std::vector<glm::vec3>> mergedPolygonsForDebug;
@@ -314,183 +282,28 @@ void NavMesh::OptimizeEarClipping()
     }
 }
 
-//----- Utility Functions -----
-
-bool NavMesh::IsPointInTriangleXZ(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
+void NavMesh::MergeTriangles(const std::vector<int>& removableEdgeIndexes)
 {
-    float v0x = c.x - a.x;
-    float v0z = c.z - a.z;
-    
-    float v1x = b.x - a.x;
-    float v1z = b.z - a.z;
-    
-    float v2x = p.x - a.x;
-    float v2z = p.z - a.z;
-
-    float dot00 = v0x * v0x + v0z * v0z;
-    float dot01 = v0x * v1x + v0z * v1z;
-    float dot02 = v0x * v2x + v0z * v2z;
-    
-    float dot11 = v1x * v1x + v1z * v1z;
-    float dot12 = v1x * v2x + v1z * v2z;
-
-    float invDenom = 1.0f / (dot00 * dot11 - dot01 * dot01);
-    float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-    float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-    
-    const float epsilon = -1e-5f; 
-    return (u >= epsilon) && (v >= epsilon) && (u + v <= 1.0f + epsilon);
-}
-
-bool NavMesh::CanClipEar(int prevIndex, int earIndex, int nextIndex, const std::vector<glm::vec3>& vertices)
-{
-    const glm::vec3& a = vertices[prevIndex];
-    const glm::vec3& b = vertices[earIndex];
-    const glm::vec3& c = vertices[nextIndex];
-
-    for (size_t i = 0; i < vertices.size(); ++i)
-    {
-        if (i == prevIndex || i == earIndex || i == nextIndex)
-            continue;
-        
-        const glm::vec3& currentPoint = vertices[i];
-
-        if (IsItEqual(currentPoint, a) || IsItEqual(currentPoint, b) || IsItEqual(currentPoint, c))
-            continue;
-
-        if (IsPointInTriangleXZ(currentPoint, a, b, c))
-            return false;
-    }
-    return true;
-}
-
-int NavMesh::FindHalfEdgeIndex(const glm::vec3& pos)
-{
-    for (size_t i = 0; i < m_HalfEdgeVertices.size(); ++i)
-        if (IsItEqual(m_HalfEdgeVertices[i].position, pos))
-            return static_cast<int>(i);
-    
-    HalfEdgeVertex newVertex;
-    newVertex.position = pos;
-    m_HalfEdgeVertices.push_back(newVertex);
-    return static_cast<int>(m_HalfEdgeVertices.size() - 1);
-}
-
-void NavMesh::FindRemovableEdgeIndices(std::vector<int>& outRemovableEdgeIndices)
-{
-    std::vector<glm::vec3> removableEdgeLines;
-    std::vector<glm::vec3> essentialEdgeLines;
-
-     for (size_t i = 0; i < m_HalfEdges.size(); ++i)
-    {
-        const HalfEdge& halfEdge = m_HalfEdges[i];
-        
-        if (halfEdge.twinHalfEdgeIndexID != -1 && i < halfEdge.twinHalfEdgeIndexID)
-        {
-            const HalfEdge& twinHe = m_HalfEdges[halfEdge.twinHalfEdgeIndexID];
-            
-            const glm::vec3& vA = m_HalfEdgeVertices[halfEdge.originVertexIndexID].position;
-            const glm::vec3& vB = m_HalfEdgeVertices[twinHe.originVertexIndexID].position;
-            
-            // he -> nextHe -> nextNextHe
-            // vA -> vB -> vC
-            const HalfEdge& nextHe = m_HalfEdges[halfEdge.nextHalfEdgeIndexID];
-            const HalfEdge& nextNextHe = m_HalfEdges[nextHe.nextHalfEdgeIndexID];
-            const glm::vec3& vC = m_HalfEdgeVertices[nextNextHe.originVertexIndexID].position;
-            
-            // twinHe -> twinNextHe -> twinNextNextHe
-            // vB -> vA -> vD
-            const HalfEdge& twinNextHe = m_HalfEdges[twinHe.nextHalfEdgeIndexID];
-            const HalfEdge& twinNextNextHe = m_HalfEdges[twinNextHe.nextHalfEdgeIndexID];
-            const glm::vec3& vD = m_HalfEdgeVertices[twinNextNextHe.originVertexIndexID].position;
-            
-            // vA -> vC -> vB -> vD -> vA
-            // Face 1 = A-B-C Face 2 = B-A-D
-            glm::vec3 vAC = vC - vA;
-            glm::vec3 vCB = vB - vC;
-            glm::vec3 vBD = vD - vB;
-            glm::vec3 vDA = vA - vD;
-
-            float cross1 = CrossProductXZ(vAC, vCB);
-            float cross2 = CrossProductXZ(vCB, vBD);
-            float cross3 = CrossProductXZ(vBD, vDA);
-            float cross4 = CrossProductXZ(vDA, vAC);
-            
-            const float epsilon = 1e-5f;
-            bool bIsConvex = (cross1 > epsilon && cross2 > epsilon && cross3 > epsilon && cross4 > epsilon) ||
-                             (cross1 < -epsilon && cross2 < -epsilon && cross3 < -epsilon && cross4 < -epsilon);
-            
-            if (bIsConvex)
-            {
-                removableEdgeLines.push_back(vA);
-                removableEdgeLines.push_back(vB);
-                outRemovableEdgeIndices.push_back(static_cast<int>(i));
-            }
-            else
-            {
-                essentialEdgeLines.push_back(vA);
-                essentialEdgeLines.push_back(vB);
-            }
-        }
-    }
-
-    std::cout << "Found " << removableEdgeLines.size() / 2 << " removable (green) edges." << std::endl;
-    std::cout << "Found " << essentialEdgeLines.size() / 2 << " essential (red) edges." << std::endl;
-    m_NavMeshDebugger->SetRemovableEdges(removableEdgeLines);
-    m_NavMeshDebugger->SetCannotRemoveEdges(essentialEdgeLines);
-}
-
-void NavMesh::MergeTriangles(const std::vector<int>& removableEdgeIndices)
-{
-    std::cout << "Starting merge... Found " << removableEdgeIndices.size() << " removable edges." << std::endl;
+    std::cout << "Starting merge... Found " << removableEdgeIndexes.size() << " removable edges." << std::endl;
     
     for (auto& face : m_HalfEdgeFaces)
         face.bIsValid = true;
-
-    for (int heIndex : removableEdgeIndices)
+    
+    for (int halfEdgeIndex : removableEdgeIndexes)
     {
-        HalfEdge& halfEdge = m_HalfEdges[heIndex];
-        int twinIndex = halfEdge.twinHalfEdgeIndexID;
-        
-        if (twinIndex == -1)
-            continue; 
-        
-        HalfEdge& twinHalfEdge = m_HalfEdges[twinIndex];
-        
-        if (!m_HalfEdgeFaces[halfEdge.faceIndexID].bIsValid || !m_HalfEdgeFaces[twinHalfEdge.faceIndexID].bIsValid)
-            continue; 
-        
-        int halfEdgePrevID = m_HalfEdges[halfEdge.nextHalfEdgeIndexID].nextHalfEdgeIndexID;
-        int twinPrevID = m_HalfEdges[twinHalfEdge.nextHalfEdgeIndexID].nextHalfEdgeIndexID;
+        if (halfEdgeIndex < 0 || halfEdgeIndex >= static_cast<int>(m_HalfEdges.size()))
+            continue;
 
-        HalfEdge& halfEdgePrev = m_HalfEdges[halfEdgePrevID];
-        HalfEdge& twinPrev = m_HalfEdges[twinPrevID];
+        HalfEdge& halfEdge = m_HalfEdges[halfEdgeIndex];
+        int twinID = halfEdge.twinHalfEdgeIndex;
+        if (twinID == -1)
+            continue;
         
-        halfEdgePrev.nextHalfEdgeIndexID = twinHalfEdge.nextHalfEdgeIndexID;
-        twinPrev.nextHalfEdgeIndexID = halfEdge.nextHalfEdgeIndexID;
-        
-        int faceToKeepIndex = halfEdge.faceIndexID;
-        int faceToKillIndex = twinHalfEdge.faceIndexID;
-
-        int currentEdgeIdx = twinPrev.nextHalfEdgeIndexID; 
-        while (currentEdgeIdx != halfEdgePrevID)
-        {
-            m_HalfEdges[currentEdgeIdx].faceIndexID = faceToKeepIndex;
-            currentEdgeIdx = m_HalfEdges[currentEdgeIdx].nextHalfEdgeIndexID;
-            
-            if (currentEdgeIdx == twinPrev.nextHalfEdgeIndexID)
-            {
-                std::cerr << "Infinite loop detected in face merge!" << std::endl;
-                break; 
-            }
-        }
-        
-        m_HalfEdgeFaces[faceToKeepIndex].halfEdgeIndex = halfEdgePrevID; 
-        m_HalfEdgeFaces[faceToKillIndex].bIsValid = false;
-        
-        halfEdge.faceIndexID = -1;
-        twinHalfEdge.faceIndexID = -1;
+        if (m_HalfEdgeFaces[m_HalfEdges[twinID].faceID].bIsValid)
+            NavigationUtility::MergeTwoFacesProperley(halfEdgeIndex, m_HalfEdges, m_HalfEdgeFaces, m_HalfEdgeVertices);
     }
+    
+    FindTwinHalfEdges();
     std::cout << "Merge complete." << std::endl;
 }
 
@@ -498,7 +311,7 @@ void NavMesh::CreatePathfindingNodes(std::map<int, int>& faceIndexToNodeIndex, s
 {
     m_PathfindingNodes.clear();
 
-    for (int i = 0; i < m_HalfEdgeFaces.size(); ++i)
+    for (int i = 0; i < static_cast<int>(m_HalfEdgeFaces.size()); ++i)
     {
         const auto& face = m_HalfEdgeFaces[i];
         if (face.bIsValid)
@@ -508,26 +321,25 @@ void NavMesh::CreatePathfindingNodes(std::map<int, int>& faceIndexToNodeIndex, s
 
             glm::vec3 centerSum(0.0f);
             std::vector<glm::vec3> polygonVerts;
-            int startEdgeIdx = face.halfEdgeIndex;
-            int currentEdgeIdx = startEdgeIdx;
+            int startEdgeID = face.halfEdgeIndex;
+            int currentEdgeID = startEdgeID;
             
             do
             {
-                const HalfEdge& currentEdge = m_HalfEdges[currentEdgeIdx];
-                const glm::vec3& vertPos = m_HalfEdgeVertices[currentEdge.originVertexIndexID].position;
+                const HalfEdge& currentEdge = m_HalfEdges[currentEdgeID];
+                const glm::vec3& vertPos = m_HalfEdgeVertices[currentEdge.originVertexIndex].position;
                 
                 polygonVerts.push_back(vertPos);
                 centerSum += vertPos;
                 
-                currentEdgeIdx = currentEdge.nextHalfEdgeIndexID;
+                currentEdgeID = currentEdge.nextHalfEdgeIndex;
             }
-            while (currentEdgeIdx != startEdgeIdx);
+            while (currentEdgeID != startEdgeID);
 
             newNode.polygonVerts = polygonVerts;
             if (!polygonVerts.empty())
-            {
                 newNode.centerPoint = centerSum / static_cast<float>(polygonVerts.size());
-            }
+            
             m_PathfindingNodes.push_back(newNode);
             faceIndexToNodeIndex[i] = static_cast<int>(m_PathfindingNodes.size() - 1);
             
@@ -540,7 +352,7 @@ void NavMesh::CreatePathfindingNodes(std::map<int, int>& faceIndexToNodeIndex, s
 
 void NavMesh::FindNeighborsForPathfindingNodes(std::map<int, int>& faceIndexToNodeIndex)
 {
-    for (int i = 0; i < m_PathfindingNodes.size(); ++i)
+    for (int i = 0; i < static_cast<int>(m_PathfindingNodes.size()); ++i)
     {
         NavMeshOptimizedNode& node = m_PathfindingNodes[i];
         const auto& face = m_HalfEdgeFaces[node.originalFaceIndex];
@@ -551,32 +363,32 @@ void NavMesh::FindNeighborsForPathfindingNodes(std::map<int, int>& faceIndexToNo
         do
         {
             const HalfEdge& currentEdge = m_HalfEdges[currentEdgeIdx];
-            int twinIndex = currentEdge.twinHalfEdgeIndexID;
+            int twinIndex = currentEdge.twinHalfEdgeIndex;
 
             if (twinIndex != -1)
             {
                 const HalfEdge& twinEdge = m_HalfEdges[twinIndex];
-                int neighborFaceOrigIndex = twinEdge.faceIndexID;
+                int neighborFaceOrigIndex = twinEdge.faceID;
                 
                 if (neighborFaceOrigIndex != -1 && m_HalfEdgeFaces[neighborFaceOrigIndex].bIsValid)
                 {
-                    auto it = faceIndexToNodeIndex.find(neighborFaceOrigIndex);
-                    if (it != faceIndexToNodeIndex.end())
+                    auto nodeIndex = faceIndexToNodeIndex.find(neighborFaceOrigIndex);
+                    if (nodeIndex != faceIndexToNodeIndex.end())
                     {
-                        int neighborNodeIndex = it->second;
+                        int neighborNodeIndex = nodeIndex->second;
                         int currentNodeIndex = i;
                         if (currentNodeIndex < neighborNodeIndex)
                         {
                             OptimizedEdge newCurrentEdge;
                             newCurrentEdge.neighborFaceIndex = neighborNodeIndex;
-                            newCurrentEdge.edgeStart = m_HalfEdgeVertices[currentEdge.originVertexIndexID].position;
-                            newCurrentEdge.edgeEnd = m_HalfEdgeVertices[twinEdge.originVertexIndexID].position;
+                            newCurrentEdge.edgeStart = m_HalfEdgeVertices[currentEdge.originVertexIndex].position;
+                            newCurrentEdge.edgeEnd = m_HalfEdgeVertices[twinEdge.originVertexIndex].position;
                             node.neighbors.push_back(newCurrentEdge);
                             
                             OptimizedEdge newNeighborEdge;
                             newNeighborEdge.neighborFaceIndex = currentNodeIndex;
-                            newNeighborEdge.edgeStart = m_HalfEdgeVertices[twinEdge.originVertexIndexID].position;
-                            newNeighborEdge.edgeEnd = m_HalfEdgeVertices[currentEdge.originVertexIndexID].position;
+                            newNeighborEdge.edgeStart = m_HalfEdgeVertices[twinEdge.originVertexIndex].position;
+                            newNeighborEdge.edgeEnd = m_HalfEdgeVertices[currentEdge.originVertexIndex].position;
                             
                             m_PathfindingNodes[neighborNodeIndex].neighbors.push_back(newNeighborEdge);
                         }
@@ -584,290 +396,10 @@ void NavMesh::FindNeighborsForPathfindingNodes(std::map<int, int>& faceIndexToNo
                 }
             }
             
-            currentEdgeIdx = currentEdge.nextHalfEdgeIndexID;
+            currentEdgeIdx = currentEdge.nextHalfEdgeIndex;
         }
         while (currentEdgeIdx != startEdgeIdx);
     }
 
     std::cout << "Populated neighbors for all " << m_PathfindingNodes.size() << " nodes." << std::endl;
-}
-
-int NavMesh::FindNodeIDByPosition(const glm::vec3& position)
-{
-    for (int i = 0; i < m_PathfindingNodes.size(); ++i)
-    {
-        const auto& node = m_PathfindingNodes[i];
-        if (node.polygonVerts.size() < 3)
-            continue;
-        const glm::vec3& verticies0 = node.polygonVerts[0];
-        for (size_t j = 1; j < node.polygonVerts.size() - 1; ++j)
-        {
-            const glm::vec3& verticies1 = node.polygonVerts[j];
-            const glm::vec3& verticies2 = node.polygonVerts[j + 1];
-            if (IsPointInTriangleXZ(position, verticies0, verticies1, verticies2))
-            {
-                return i;
-            }
-        }
-    }
-    return -1;
-}
-
-glm::vec3 NavMesh::GetNodeCenter(int nodeID)
-{
-    if (nodeID >= 0 && nodeID < m_PathfindingNodes.size())
-    {
-        return m_PathfindingNodes[nodeID].centerPoint;
-    }
-    return glm::vec3(0.0f);
-}
-
-const std::vector<OptimizedEdge>& NavMesh::GetNodeNeighbors(int nodeID)
-{
-    if (nodeID >= 0 && nodeID < m_PathfindingNodes.size())
-        return m_PathfindingNodes[nodeID].neighbors;
-    
-    static const std::vector<OptimizedEdge> s_emptyNeighbors;
-    return s_emptyNeighbors;
-}
-
-//----- Raycasting Functions -----
-
-bool NavMesh::IntersectLineSegmentsXZ(const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& q1,
-    const glm::vec3& q2, float& outLambda1, float& outLambda2, float epsilon)
-{
-    const glm::vec3 p1p2 = p2 - p1;
-    const glm::vec3 q1q2 = q2 - q1;
-    
-    const float denom = CrossProductXZ(p1p2, q1q2);
-    
-    if (std::abs(denom) > epsilon)
-    {
-        const glm::vec3 p1q1 = q1 - p1;
-
-        const float num1 = CrossProductXZ(p1q1, q1q2);
-        const float num2 = CrossProductXZ(p1q1, p1p2);
-        
-        outLambda1 = num1 / denom;
-        outLambda2 = num2 / denom;
-        
-        return true;
-    }
-    
-    outLambda1 = 0.0f;
-    outLambda2 = 0.0f;
-    return false;
-}
-
-bool NavMesh::RaycastXZ(const std::vector<glm::vec3>& vertices, const glm::vec3& rayP1, const glm::vec3& rayP2, NavMeshHitInfo& hitInfo)
-{
-    if (vertices.empty())
-        return false;
-
-    std::vector<NavMeshHitInfo> hits;
-    
-    float rayMinX = std::min(rayP1.x, rayP2.x);
-    float rayMaxX = std::max(rayP1.x, rayP2.x);
-    float rayMinZ = std::min(rayP1.z, rayP2.z);
-    float rayMaxZ = std::max(rayP1.z, rayP2.z);
-    
-    for (size_t i = 0; i < vertices.size(); ++i)
-    {
-        const glm::vec3& q1 = vertices[i];
-        const glm::vec3& q2 = vertices[(i + 1) % vertices.size()];
-        
-        float lineMinX = std::min(q1.x, q2.x);
-        float lineMaxX = std::max(q1.x, q2.x);
-        float lineMinZ = std::min(q1.z, q2.z);
-        float lineMaxZ = std::max(q1.z, q2.z);
-        
-        if (rayMaxX < lineMinX || rayMinX > lineMaxX || rayMaxZ < lineMinZ || rayMinZ > lineMaxZ)
-            continue;
-        
-        float lambda1 = 0.0f;
-        float lambda2 = 0.0f;
-        if (IntersectLineSegmentsXZ(rayP1, rayP2, q1, q2, lambda1, lambda2))
-        {
-            if (lambda1 > 1e-6f && lambda1 <= 1.0f && lambda2 > 1e-6f && lambda2 <= 1.0f)
-            {
-                NavMeshHitInfo currentHit;
-                currentHit.lambda = lambda1;
-                
-                currentHit.intersectPoint = rayP1 + (rayP2 - rayP1) * lambda1;
-                
-                glm::vec3 lineVec = q2 - q1;
-                currentHit.normal = glm::normalize(glm::vec3(-lineVec.z, 0.0f, lineVec.x));
-                
-                currentHit.firstPointOfIntersectedLine = q1;
-                currentHit.secondPointOfIntersectedLine = q2;
-                currentHit.rayStartPoint = rayP1;
-                currentHit.rayEndPoint = rayP2;
-
-                hits.push_back(currentHit);
-            }
-        }
-    }
-
-    if (hits.empty())
-        return false;
-    
-    auto closestHit =
-        std::min_element(hits.begin(), hits.end(),[](const NavMeshHitInfo& a, const NavMeshHitInfo& b)
-        {
-            return a.lambda < b.lambda;
-        }
-    );
-
-    hitInfo = *closestHit;
-    return true;
-}
-
-std::vector<std::vector<glm::vec3>> NavMesh::GetSceneObstacleSlices(float buildPlaneY) const
-{
-    std::vector<std::vector<glm::vec3>> allSlices;
-    const float radius = BuildParams.agentRadius;
-    
-    const std::vector<Vec3f> localCubeVerts = {
-        {-0.5f, -0.5f, -0.5f}, // 0
-        { 0.5f, -0.5f, -0.5f}, // 1
-        { 0.5f,  0.5f, -0.5f}, // 2
-        {-0.5f,  0.5f, -0.5f}, // 3
-        {-0.5f, -0.5f,  0.5f}, // 4
-        { 0.5f, -0.5f,  0.5f}, // 5
-        { 0.5f,  0.5f,  0.5f}, // 6
-        {-0.5f,  0.5f,  0.5f}  // 7
-    };
-    
-    for (const auto& object : m_Scene.GetObjects())
-    {
-        glm::vec3 minBounds(std::numeric_limits<float>::max());
-        glm::vec3 maxBounds(std::numeric_limits<float>::lowest());
-        
-        for (const auto& localVert : localCubeVerts)
-        {
-            glm::vec4 worldPos = object.modelMatrix * glm::vec4(localVert.x, localVert.y, localVert.z, 1.0f);
-            
-            minBounds.x = std::min(minBounds.x, worldPos.x);
-            minBounds.y = std::min(minBounds.y, worldPos.y);
-            minBounds.z = std::min(minBounds.z, worldPos.z);
-            
-            maxBounds.x = std::max(maxBounds.x, worldPos.x);
-            maxBounds.y = std::max(maxBounds.y, worldPos.y);
-            maxBounds.z = std::max(maxBounds.z, worldPos.z);
-        }
-        
-        if (buildPlaneY < minBounds.y || buildPlaneY > maxBounds.y)
-            continue;
-
-        maxBounds.x += radius;
-        maxBounds.z += radius;
-        minBounds.x -= radius;
-        minBounds.z -= radius;
-        
-        std::vector<glm::vec3> sliceFootprint;
-        const float y = buildPlaneY;
-        
-        // (minX, minZ) -> (maxX, minZ) -> (maxX, maxZ) -> (minX, maxZ)
-        sliceFootprint.push_back(glm::vec3(minBounds.x, y, minBounds.z));
-        sliceFootprint.push_back(glm::vec3(maxBounds.x, y, minBounds.z));
-        sliceFootprint.push_back(glm::vec3(maxBounds.x, y, maxBounds.z));
-        sliceFootprint.push_back(glm::vec3(minBounds.x, y, maxBounds.z));
-        
-        allSlices.push_back(sliceFootprint);
-    }
-
-    return allSlices;
-}
-
-void NavMesh::SortObstaclesByMaxX(std::vector<std::vector<glm::vec3>>& obstacleSlices)
-{
-    auto compareX = [](const glm::vec3& a, const glm::vec3& b)
-    {
-        return a.x < b.x;
-    };
-    
-    std::sort(obstacleSlices.begin(), obstacleSlices.end(), [&compareX](const std::vector<glm::vec3>& lhs, const std::vector<glm::vec3>& rhs) 
-    {
-        auto max_it_lhs = std::max_element(lhs.begin(), lhs.end(), compareX);
-        auto max_it_rhs = std::max_element(rhs.begin(), rhs.end(), compareX);
-        
-        if (max_it_lhs == lhs.end())
-            return false;
-        if (max_it_rhs == rhs.end())
-            return true;
-        
-        return max_it_lhs->x > max_it_rhs->x;
-    });
-}
-
-void NavMesh::InsertObstacle(const std::vector<glm::vec3>& obstacleSlice)
-{
-    if (obstacleSlice.empty())
-        return;
-    
-    auto mostRightPointIt =
-        std::max_element(obstacleSlice.begin(), obstacleSlice.end(),[](const glm::vec3& a, const glm::vec3& b)
-        {
-            return a.x < b.x;
-        });
-
-    const glm::vec3 mostRightPoint = *mostRightPointIt;
-    
-    const glm::vec3 rayP1 = mostRightPoint;
-    const glm::vec3 rayP2 = mostRightPoint + glm::vec3(10000.0f, 0.0f, 0.0f);
-    NavMeshHitInfo hitInfo;
-
-    if (!RaycastXZ(m_NavMeshVerts3D, rayP1, rayP2, hitInfo))
-    {
-        std::cerr << "Obstacle line didnt hit border" << std::endl;
-        return;
-    }
-    
-    //m_NavMeshDebugger->SetEarClipping({ rayP1, hitInfo.intersectPoint });
-    
-    const glm::vec3 connectToPos = hitInfo.firstPointOfIntersectedLine;
-
-    std::vector<size_t> indices;
-    for (size_t i = 0; i < m_NavMeshVerts3D.size(); ++i)
-        if (IsItEqual(m_NavMeshVerts3D[i], connectToPos))
-            indices.push_back(i);
-        
-
-    if (indices.empty())
-    {
-        std::cerr << "The hit point is not found in the main list" << std::endl;
-        return;
-    }
-
-    size_t connectToIndex = indices.back();
-    const float mostRightPointZ = mostRightPoint.z;
-
-    for (size_t index : indices)
-    {
-        size_t nextIndex = (index + 1) % m_NavMeshVerts3D.size();
-        if (m_NavMeshVerts3D[nextIndex].z > mostRightPointZ)
-        {
-            connectToIndex = index;
-            break;
-        }
-    }
-    
-    auto connectToIt = m_NavMeshVerts3D.begin() + connectToIndex;
-    
-    std::vector<glm::vec3> verticesToInsert = obstacleSlice;
-    
-    std::reverse(verticesToInsert.begin(), verticesToInsert.end());
-    auto mostRightPointIt_CW = std::find_if(verticesToInsert.begin(), verticesToInsert.end(), 
-        [&mostRightPoint](const glm::vec3& v){ return IsItEqual(v, mostRightPoint); });
-    if (mostRightPointIt_CW == verticesToInsert.end())
-    {
-        std::cerr << "Internal error: mostRightPoint not found after reverse." << std::endl;
-        return; 
-    }
-    std::rotate(verticesToInsert.begin(), mostRightPointIt_CW, verticesToInsert.end());
-    
-    verticesToInsert.push_back(verticesToInsert[0]); 
-    verticesToInsert.push_back(*connectToIt);
-    
-    m_NavMeshVerts3D.insert(connectToIt + 1, verticesToInsert.begin(), verticesToInsert.end());
 }

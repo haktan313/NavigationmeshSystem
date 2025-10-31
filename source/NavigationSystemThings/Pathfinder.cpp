@@ -5,8 +5,8 @@
 
 std::vector<int> Pathfinder::FindPath(NavMesh& navMesh, const glm::vec3& start, const glm::vec3& end)
 {
-    int startNodeID = navMesh.FindNodeIDByPosition(start);
-    int endNodeID = navMesh.FindNodeIDByPosition(end);
+    int startNodeID = NavigationUtility::FindNodeIDByPosition(start, navMesh);
+    int endNodeID = NavigationUtility::FindNodeIDByPosition(end, navMesh);
     if (startNodeID == -1 || endNodeID == -1)
     {
         std::cout << "Pathfinder: Start or End position is outside the NavMesh." << std::endl;
@@ -41,7 +41,7 @@ std::vector<int> Pathfinder::FindPath(NavMesh& navMesh, const glm::vec3& start, 
             continue;
         closedSet.insert(currentNodeID);
 
-        for (const auto& neighborEdge : navMesh.GetNodeNeighbors(currentNodeID))
+        for (const auto& neighborEdge : NavigationUtility::GetNodeNeighbors(currentNodeID, navMesh))
         {
             int neighborID = neighborEdge.neighborFaceIndex;
             if (closedSet.count(neighborID))
@@ -68,7 +68,7 @@ std::vector<int> Pathfinder::FindPath(NavMesh& navMesh, const glm::vec3& start, 
 
 float Pathfinder::CalculateCost(NavMesh& navMesh, int nodeA, int nodeB)
 {
-    return glm::distance(navMesh.GetNodeCenter(nodeA), navMesh.GetNodeCenter(nodeB));
+    return glm::distance(NavigationUtility::GetNodeCenter(nodeA, navMesh), NavigationUtility::GetNodeCenter(nodeB,navMesh));
 }
 
 std::vector<int> Pathfinder::ReconstructPath(std::map<int, int>& cameFrom, int currentID)
